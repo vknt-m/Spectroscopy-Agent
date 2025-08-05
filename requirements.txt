@@ -1,0 +1,20 @@
+# Core ML/NLP
+smolagents>=1.9.2
+litellm>=1.35.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.2
+
+# PDF Processing
+pymupdf4llm>=0.0.5
+langchain-text-splitters>=0.0.1
+
+# Data Processing
+pandas>=1.5.0
+tqdm>=4.65.0
+PyYAML>=6.0
+
+# UI
+gradio>=4.0.0
+
+# Utilities
+requests>=2.31.0

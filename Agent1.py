@@ -36,7 +36,7 @@ def retrieve_chunks(query: str, n_results: int = 5) -> str:
 
 llm = LiteLLMModel(
     model_id="ollama_chat/gemma3:4b",  # e.g., "gpt-3.5-turbo" or your local model's name/alias
-    api_base= model_link,  # ngrok URL for your LLM server
+    api_base= model_link,  # ngrok or local URL for your LLM server
     #api_key="sk-..."  # Use a dummy value if your local LLM does not require a key
     num_ctx=16384,  # Adjust based on your model's context length
     

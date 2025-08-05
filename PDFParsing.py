@@ -1,4 +1,4 @@
-# %%
+
 import pymupdf4llm
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 import os
@@ -13,7 +13,6 @@ OUTPUT_CSV_PATH = "spectroscopy_chunks_final_robust.csv"
 CHUNK_SIZE = 1000 # The target size for each final chunk in characters
 CHUNK_OVERLAP = 150 # The overlap between consecutive final chunks
 
-# %%
 # --- Helper Functions ---
 def safe_filename(name):
     """Sanitizes a string to be safe for filenames."""
@@ -50,7 +49,7 @@ def get_closest_page_number(chunk_text: str, page_md_chunks: List[Dict[str, Any]
     # Ultimate Fallback: If nothing matches, assign to page 1 or 0
     return 1 if page_md_chunks else 0 # Default to page 1 if document exists
 
-# %%
+
 # --- Main Parsing and Chunking Logic ---
 all_chunks_data = []
 
@@ -139,7 +138,7 @@ else:
     print("\nNo chunks were created. Please check your PDF directory and file contents.")
 
 
-# %%
+
 
 
 
