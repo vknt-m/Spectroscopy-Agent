@@ -5,3 +5,5 @@ secretstuff.py
 .vscode/
 __pycache__/
 LSG papers/
+testing/
+pdf_chunks.csv
