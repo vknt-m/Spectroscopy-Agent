@@ -24,6 +24,8 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharac
 import pandas as pd
 from tqdm import tqdm
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 # ---------------- CONFIG ----------------
 PDF_DIR = Path("docs_pdfs")
 THESIS_DIR = PDF_DIR / "thesis"
@@ -181,7 +183,7 @@ def guess_title_and_author_from_lines(lines: List[str]) -> Tuple[str, str]:
     author = ""
 
     title_stop_phrases = [
-        "submitted for", "a thesis", "by", "author", "supervisor", "copyright",
+        "submitted for", "a thesis", "by", "author", "supervisor", "right",
         "indian institute", "faculty of", "department of", "centre for", "chapter", "section"
     ]
 
@@ -265,67 +267,66 @@ def choose_concise_title(*candidates: str, min_len: int = 20, max_len: int = 50)
     return min(cand_list, key=lambda x: len(x.strip()))
 
 # ---------------- PROCESS & RENAME ----------------
-def process_and_copy_pdfs() -> List[Dict[str, Any]]:
+
+def process_single_pdf(pdf_path: Path, is_thesis: bool) -> Dict[str, Any]:
+    try:
+        title_meta, author_meta, year_meta = merge_metadata(pdf_path)
+        # If thesis, apply thesis logic to get title/author from page content
+        title_text, author_text = "", ""
+        if is_thesis:
+            lines = extract_raw_lines(pdf_path, max_pages=2)
+            title_text, author_text = guess_title_and_author_from_lines(lines)
+        else:
+            if not title_meta:
+                lines = extract_raw_lines(pdf_path, max_pages=1)
+                title_text, _ = guess_title_and_author_from_lines(lines)
+        # final selection (concise title preference)
+        final_title = choose_concise_title(title_meta, title_text, max_len=120)
+        if not final_title or final_title.lower() in ("", "unknown"):
+            final_title = title_meta or title_text or "unknown"
+        # authors: prefer metadata if it's a clean name list, otherwise use text-extracted
+        final_author_raw = author_meta or author_text or "unknown"
+        final_author = compact_author_list(final_author_raw, max_authors=3)
+        safe_title = sanitize_filename_part(final_title, max_len=80)
+        safe_author = sanitize_filename_part(final_author, max_len=60)
+        safe_year = sanitize_filename_part(year_meta or "unknown", max_len=8)
+        new_filename = f"{safe_year}_{safe_title}_{safe_author}.pdf"
+        new_filename = truncate_filename(new_filename)
+        new_path = OUTPUT_DIR / new_filename
+        new_path = ensure_unique_filename(new_path)
+        shutil.copy2(pdf_path, new_path)
+        return {
+            "orig_path": str(pdf_path),
+            "new_filename": new_path.name,
+            "title": final_title,
+            "author": final_author,
+            "year": safe_year,
+            "type": "thesis" if is_thesis else "published"
+        }
+    except Exception as e:
+        return {"orig_path": str(pdf_path), "error": str(e)}
+
+def process_and__pdfs() -> List[Dict[str, Any]]:
     """
-    Process thesis and published folders (by folder) and copy/rename into OUTPUT_DIR.
+    Process thesis and published folders (by folder) and /rename into OUTPUT_DIR.
     Returns list of dicts: { orig_path, new_filename, title, author, year, type }
     """
+    tasks = []
+    for folder, is_thesis in [(THESIS_DIR, True), (PUBLISHED_DIR, False)]:
+        if folder.exists():
+            for pdf_path in folder.glob("*.pdf"):
+                tasks.append((pdf_path, is_thesis))
+
     processed = []
-
-    folders = [
-        (THESIS_DIR, True),
-        (PUBLISHED_DIR, False)
-    ]
-
-    for folder, is_thesis in folders:
-        if not folder.exists():
-            continue
-        for pdf_path in folder.glob("*.pdf"):
-            # unified metadata extraction
-            title_meta, author_meta, year_meta = merge_metadata(pdf_path)
-            
-            # If thesis, apply thesis logic to get title/author from page content
-            title_text = ""
-            author_text = ""
-            if is_thesis:
-                lines = extract_raw_lines(pdf_path, max_pages=2)
-                title_text, author_text = guess_title_and_author_from_lines(lines)
+    with ProcessPoolExecutor() as executor:
+        futures = {executor.submit(process_single_pdf, p, is_thesis): (p, is_thesis) for p, is_thesis in tasks}
+        for f in tqdm(as_completed(futures), total=len(futures), desc="Processing PDFs"):
+            result = f.result()
+            if result and "error" not in result:
+                processed.append(result)
             else:
-                # published: if title missing in metadata, try title extraction
-                if not title_meta:
-                    lines = extract_raw_lines(pdf_path, max_pages=1)
-                    title_text, _ = guess_title_and_author_from_lines(lines)
+                print(f"Warning: failed processing {result.get('orig_path')}: {result.get('error')}")
 
-            # final selection (concise title preference)
-            final_title = choose_concise_title(title_meta, title_text, max_len=120)
-            if not final_title or final_title.lower() in ("", "unknown"):
-                final_title = title_meta or title_text or "unknown"
-
-            # authors: prefer metadata if it's a clean name list, otherwise use text-extracted
-            final_author_raw = author_meta or author_text or "unknown"
-            final_author = compact_author_list(final_author_raw, max_authors=3)
-
-            # limit lengths for filename components
-            safe_title = sanitize_filename_part(final_title, max_len=80)
-            safe_author = sanitize_filename_part(final_author, max_len=60)
-            safe_year = sanitize_filename_part(year_meta or "unknown", max_len=8)
-
-            new_filename = f"{safe_year}_{safe_title}_{safe_author}.pdf"
-            new_filename = truncate_filename(new_filename)
-            new_path = OUTPUT_DIR / new_filename
-            new_path = ensure_unique_filename(new_path)
-
-            # copy file (preserve original)
-            shutil.copy2(pdf_path, new_path)
-
-            processed.append({
-                "orig_path": str(pdf_path),
-                "new_filename": new_path.name,
-                "title": final_title,
-                "author": final_author,
-                "year": safe_year,
-                "type": "thesis" if is_thesis else "published"
-            })
     return processed
 
 # ---------------- CHUNKING ----------------
@@ -402,7 +403,7 @@ def chunk_and_save(processed_files: List[Dict[str, Any]]):
 
 # ---------------- MAIN ----------------
 def main():
-    processed_files = process_and_copy_pdfs()
+    processed_files = process_and__pdfs()
     if not processed_files:
         print("No PDFs processed. Check folders.")
         return
