@@ -351,49 +351,55 @@ def get_closest_page_number(chunk_text: str, page_md_chunks: List[Dict[str, Any]
             return page_num
     return 1
 
+
+def chunk_single_pdf(info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    pdf_filename = info["new_filename"]
+    pdf_path = OUTPUT_DIR / pdf_filename
+    if not pdf_path.exists():
+        return []
+    try:
+        headers_to_split_on = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
+        markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on, strip_headers=False)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+        page_md_chunks = pymupdf4llm.to_markdown(str(pdf_path), page_chunks=True)
+        full_md = "\n\n".join([p.get("text", "") for p in page_md_chunks])
+        header_docs = markdown_splitter.split_text(full_md)
+        final_docs = text_splitter.split_documents(header_docs)
+        chunks = []
+        for doc in final_docs:
+            page_num = get_closest_page_number(doc.page_content, page_md_chunks)
+            chunks.append({
+                "source_filename": pdf_filename,
+                "title": info["title"],
+                "author": info["author"],
+                "year": info["year"],
+                "page_number": page_num,
+                "chunk_text": doc.page_content,
+                "chunk_metadata": str(getattr(doc, "metadata", {}))
+            })
+        return chunks
+    except Exception as e:
+        import traceback
+        with open("errors.log", "a", encoding="utf-8") as logf:
+            logf.write(f"Failed chunking {pdf_filename}: {e}\n")
+            logf.write(traceback.format_exc() + "\n")
+        print(f"Warning: failed chunking {pdf_filename}, see errors.log for details.")
+        return []
+    
 def chunk_and_save(processed_files: List[Dict[str, Any]]):
+    """
+    For each processed PDF, chunk its text and save all chunks to OUTPUT_CSV_PATH.
+    Each chunk has metadata: source_filename, title, author, year, page_number, chunk_text, chunk_metadata
+    """
+
     all_chunks = []
+    with ProcessPoolExecutor() as executor:
+        futures = {executor.submit(chunk_single_pdf, info): info for info in processed_files}
+        for f in tqdm(as_completed(futures), total=len(futures), desc="Chunking PDFs"):
+            result = f.result()
+            if result:
+                all_chunks.extend(result)
 
-    # init splitters
-    headers_to_split_on = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")]
-    markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on, strip_headers=False)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-
-    for info in tqdm(processed_files, desc="Chunking PDFs"):
-        pdf_filename = info["new_filename"]
-        pdf_path = OUTPUT_DIR / pdf_filename
-        if not pdf_path.exists():
-            continue
-
-        try:
-            # convert to markdown with page chunks
-            page_md_chunks = pymupdf4llm.to_markdown(str(pdf_path), page_chunks=True)
-            full_md = "\n\n".join([p.get("text", "") for p in page_md_chunks])
-
-            header_docs = markdown_splitter.split_text(full_md)
-            final_docs = text_splitter.split_documents(header_docs)
-
-            for doc in final_docs:
-                page_num = get_closest_page_number(doc.page_content, page_md_chunks)
-                chunk_record = {
-                    "source_filename": pdf_filename,
-                    "title": info["title"],
-                    "author": info["author"],
-                    "year": info["year"],
-                    "page_number": page_num,
-                    "chunk_text": doc.page_content,
-                    "chunk_metadata": str(getattr(doc, "metadata", {}))
-                }
-                all_chunks.append(chunk_record)
-
-        except Exception as e:
-            import traceback
-            with open("errors.log", "a", encoding="utf-8") as f:
-                f.write(f"Failed chunking {pdf_path}: {e}\n")
-                f.write(traceback.format_exc() + "\n")
-            print(f"Warning: Error chunking {pdf_path}, logged to errors.log")
-
-    # save CSV if we have chunks
     if all_chunks:
         df = pd.DataFrame(all_chunks)
         df.to_csv(OUTPUT_CSV_PATH, index=False, encoding="utf-8")
