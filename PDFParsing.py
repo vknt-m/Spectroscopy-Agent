@@ -269,9 +269,11 @@ def choose_concise_title(*candidates: str, min_len: int = 20, max_len: int = 50)
 # ---------------- PROCESS & RENAME ----------------
 
 def process_single_pdf(pdf_path: Path, is_thesis: bool) -> Dict[str, Any]:
+
     try:
         title_meta, author_meta, year_meta = merge_metadata(pdf_path)
         # If thesis, apply thesis logic to get title/author from page content
+
         title_text, author_text = "", ""
         if is_thesis:
             lines = extract_raw_lines(pdf_path, max_pages=2)
@@ -280,24 +282,41 @@ def process_single_pdf(pdf_path: Path, is_thesis: bool) -> Dict[str, Any]:
             if not title_meta:
                 lines = extract_raw_lines(pdf_path, max_pages=1)
                 title_text, _ = guess_title_and_author_from_lines(lines)
+
         # final selection (concise title preference)
         final_title = choose_concise_title(title_meta, title_text, max_len=120)
+
         if not final_title or final_title.lower() in ("", "unknown"):
             final_title = title_meta or title_text or "unknown"
+
+
         # authors: prefer metadata if it's a clean name list, otherwise use text-extracted
         final_author_raw = author_meta or author_text or "unknown"
         final_author = compact_author_list(final_author_raw, max_authors=3)
         safe_title = sanitize_filename_part(final_title, max_len=80)
         safe_author = sanitize_filename_part(final_author, max_len=60)
         safe_year = sanitize_filename_part(year_meta or "unknown", max_len=8)
-        new_filename = f"{safe_year}_{safe_title}_{safe_author}.pdf"
-        new_filename = truncate_filename(new_filename)
-        new_path = OUTPUT_DIR / new_filename
-        new_path = ensure_unique_filename(new_path)
-        shutil.copy2(pdf_path, new_path)
+
+        # Build base filename and prefer skipping copy if already present (idempotency)
+        base_filename = f"{safe_year}_{safe_title}_{safe_author}.pdf"
+        base_filename = truncate_filename(base_filename)
+        base_path = OUTPUT_DIR / base_filename
+
+        if base_path.exists():
+            # Already processed previously — reuse existing file (skip re-copy)
+            print(f"Skipping copy: {pdf_path.name} already processed as {base_path.name}")
+            selected_path = base_path
+        else:
+            # Ensure unique filename in case of race with other processes, then copy
+            selected_path = ensure_unique_filename(base_path)
+            try:
+                shutil.copy2(pdf_path, selected_path)
+            except Exception as e:
+                return {"orig_path": str(pdf_path), "error": str(e)}
+
         return {
             "orig_path": str(pdf_path),
-            "new_filename": new_path.name,
+            "new_filename": selected_path.name,
             "title": final_title,
             "author": final_author,
             "year": safe_year,
@@ -306,7 +325,7 @@ def process_single_pdf(pdf_path: Path, is_thesis: bool) -> Dict[str, Any]:
     except Exception as e:
         return {"orig_path": str(pdf_path), "error": str(e)}
 
-def process_and__pdfs() -> List[Dict[str, Any]]:
+def process_and_copy_pdfs() -> List[Dict[str, Any]]:
     """
     Process thesis and published folders (by folder) and /rename into OUTPUT_DIR.
     Returns list of dicts: { orig_path, new_filename, title, author, year, type }
@@ -331,25 +350,33 @@ def process_and__pdfs() -> List[Dict[str, Any]]:
 
 # ---------------- CHUNKING ----------------
 def get_closest_page_number(chunk_text: str, page_md_chunks: List[Dict[str, Any]]) -> int:
-    """Finds 1-based page where chunk_text starts; fallback to 1."""
+    """Finds 1-based page where chunk_text starts; fallback to 1.
+    Optimized: uses hashing + fallback fuzzy search for speed."""
+    import hashlib
+    from difflib import SequenceMatcher
+
     if not chunk_text or not page_md_chunks:
         return 0
     snippet = chunk_text[:200].strip()
     if not snippet:
         return 0
+
+    # Precompute hashes of page texts
+    snippet_hash = hashlib.md5(snippet.encode("utf-8")).hexdigest()
     for page_data in page_md_chunks:
         page_text = page_data.get("text", "")
-        page_num = page_data.get("metadata", {}).get("page", 0) + 1
-        if snippet in page_text:
-            return page_num
-    # fallback: search by first few words
-    first_words = " ".join(snippet.split()[:5])
+        if hashlib.md5(page_text[:200].encode("utf-8")).hexdigest() == snippet_hash:
+            return page_data.get("metadata", {}).get("page", 0) + 1
+
+    # Fallback: fuzzy matching on first 30 chars
+    best_score, best_page = 0.0, 1
     for page_data in page_md_chunks:
         page_text = page_data.get("text", "")
-        page_num = page_data.get("metadata", {}).get("page", 0) + 1
-        if first_words and first_words in page_text:
-            return page_num
-    return 1
+        ratio = SequenceMatcher(None, snippet[:30], page_text[:200]).ratio()
+        if ratio > best_score:
+            best_score = ratio
+            best_page = page_data.get("metadata", {}).get("page", 0) + 1
+    return best_page
 
 
 def chunk_single_pdf(info: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -391,25 +418,48 @@ def chunk_and_save(processed_files: List[Dict[str, Any]]):
     For each processed PDF, chunk its text and save all chunks to OUTPUT_CSV_PATH.
     Each chunk has metadata: source_filename, title, author, year, page_number, chunk_text, chunk_metadata
     """
+    header_written = Path(OUTPUT_CSV_PATH).exists()
 
-    all_chunks = []
+    # Load already-processed filenames from existing CSV, if present
+    processed_filenames = set()
+    if header_written:
+        try:
+            existing_df = pd.read_csv(OUTPUT_CSV_PATH, usecols=["source_filename"])
+            processed_filenames = set(existing_df["source_filename"].unique())
+        except Exception:
+            # if reading fails for any reason, continue with empty set (will attempt chunking)
+            processed_filenames = set()
+
+    # Only chunk files that are not already present in the CSV
+    tasks = [info for info in processed_files if info["new_filename"] not in processed_filenames]
+    if not tasks:
+        print("All PDFs already chunked, skipping.")
+        return
+
     with ProcessPoolExecutor() as executor:
-        futures = {executor.submit(chunk_single_pdf, info): info for info in processed_files}
+        futures = {executor.submit(chunk_single_pdf, info): info for info in tasks}
         for f in tqdm(as_completed(futures), total=len(futures), desc="Chunking PDFs"):
             result = f.result()
             if result:
-                all_chunks.extend(result)
+                # incremental CSV writing instead of keeping all in memory
+                df = pd.DataFrame(result)
+                df.to_csv(
+                    OUTPUT_CSV_PATH,
+                    mode="a",
+                    header=not header_written,
+                    index=False,
+                    encoding="utf-8"
+                )
+                header_written = True
 
-    if all_chunks:
-        df = pd.DataFrame(all_chunks)
-        df.to_csv(OUTPUT_CSV_PATH, index=False, encoding="utf-8")
-        print(f"Saved {len(df)} chunks to {OUTPUT_CSV_PATH}")
+    if header_written:
+        print(f"Chunks appended to {OUTPUT_CSV_PATH}")
     else:
         print("No chunks created (no PDFs processed or chunking failed).")
 
 # ---------------- MAIN ----------------
 def main():
-    processed_files = process_and__pdfs()
+    processed_files = process_and_copy_pdfs()
     if not processed_files:
         print("No PDFs processed. Check folders.")
         return
