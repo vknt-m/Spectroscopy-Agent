@@ -32,14 +32,14 @@ OUTPUT_DIR = PDF_DIR / "papers"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUTPUT_CSV_PATH = "pdf_chunks.csv"
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 150
+CHUNK_SIZE = 750
+CHUNK_OVERLAP = 225
 # ----------------------------------------
 
 # ---------------- UTILITIES ----------------
 _invalid_filename_re = re.compile(r'[\\/*?:"<>|]+')
 _whitespace_re = re.compile(r'\s+')
-_year_re = re.compile(r'(19|20)\d{2}')
+_year_re = re.compile(r'\b(19|20)\d{2}\b')
 
 def sanitize_filename_part(s: str, max_len: int = 120) -> str:
     if not s:
@@ -51,6 +51,13 @@ def sanitize_filename_part(s: str, max_len: int = 120) -> str:
     if not s:
         return "unknown"
     return s[:max_len]
+
+def truncate_filename(fullname: str, max_len: int = 180) -> str:
+    """Ensure total filename length doesn't exceed OS limits (255 is max, we keep buffer)."""
+    if len(fullname) <= max_len:
+        return fullname
+    base, ext = os.path.splitext(fullname)
+    return base[: max_len - len(ext)] + ext
 
 def ensure_unique_filename(path: Path) -> Path:
     """Append counter if file exists."""
@@ -142,7 +149,6 @@ def extract_metadata_pikepdf(pdf_path: Path) -> Dict[str, str]:
 
 def merge_metadata(pdf_path: Path) -> Tuple[str, str, str]:
     """
-    Merge metadata from pikepdf (prefer) and pymupdf as fallback.
     Also try to infer year from filename if none found.
     Returns title, author, year (strings, maybe empty).
     """
@@ -275,28 +281,9 @@ def process_and_copy_pdfs() -> List[Dict[str, Any]]:
         if not folder.exists():
             continue
         for pdf_path in folder.glob("*.pdf"):
-            # read metadata from both tools
-            title_meta_mu, author_meta_mu, year_meta_mu = "", "", ""
-            try:
-                m1 = extract_metadata_pymupdf(pdf_path)
-                title_meta_mu, author_meta_mu, year_meta_mu = m1.get("title", ""), m1.get("author", ""), m1.get("year", "")
-            except Exception:
-                title_meta_mu, author_meta_mu, year_meta_mu = "", "", ""
-
-            title_meta_pike, author_meta_pike, year_meta_pike = "", "", ""
-            try:
-                mp = extract_metadata_pikepdf(pdf_path)
-                title_meta_pike, author_meta_pike, year_meta_pike = mp.get("title", ""), mp.get("author", ""), mp.get("year", "")
-            except Exception:
-                title_meta_pike, author_meta_pike, year_meta_pike = "", "", ""
-
-            # merged metadata
-            title_meta = title_meta_pike or title_meta_mu or ""
-            author_meta = author_meta_pike or author_meta_mu or ""
-            year_meta = year_meta_pike or year_meta_mu or ""
-            if not year_meta:
-                year_meta = extract_year_from_text(pdf_path.name) or "unknown"
-
+            # unified metadata extraction
+            title_meta, author_meta, year_meta = merge_metadata(pdf_path)
+            
             # If thesis, apply thesis logic to get title/author from page content
             title_text = ""
             author_text = ""
@@ -324,6 +311,7 @@ def process_and_copy_pdfs() -> List[Dict[str, Any]]:
             safe_year = sanitize_filename_part(year_meta or "unknown", max_len=8)
 
             new_filename = f"{safe_year}_{safe_title}_{safe_author}.pdf"
+            new_filename = truncate_filename(new_filename)
             new_path = OUTPUT_DIR / new_filename
             new_path = ensure_unique_filename(new_path)
 
@@ -398,7 +386,11 @@ def chunk_and_save(processed_files: List[Dict[str, Any]]):
                 all_chunks.append(chunk_record)
 
         except Exception as e:
-            print(f"Warning: failed chunking {pdf_filename}: {e}")
+            import traceback
+            with open("errors.log", "a", encoding="utf-8") as f:
+                f.write(f"Failed chunking {pdf_path}: {e}\n")
+                f.write(traceback.format_exc() + "\n")
+            print(f"Warning: Error chunking {pdf_path}, logged to errors.log")
 
     # save CSV if we have chunks
     if all_chunks:
