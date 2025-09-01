@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 PDFParsing - production-ready pipeline
 
@@ -8,7 +7,7 @@ PDFParsing - production-ready pipeline
 - Copies/renames into:
     docs_pdfs/papers/
 - Chunking & parsing using pymupdf4llm + langchain_text_splitters
-- Outputs CSV: pdf_chunks.csv
+- Outputs Parquet dataset: pdf_chunks.parquet/
 """
 
 import os
@@ -17,12 +16,14 @@ import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
+import pyarrow  # for Parquet support
 import fitz  # PyMuPDF
 import pikepdf
 import pymupdf4llm
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 import pandas as pd
-from tqdm import tqdm
+import tqdm
+import spacy
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -33,13 +34,25 @@ PUBLISHED_DIR = PDF_DIR / "published"
 OUTPUT_DIR = PDF_DIR / "papers"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-OUTPUT_CSV_PATH = "pdf_chunks.csv"
+# Output will be a directory of parquet files for efficiency and scalability
+OUTPUT_PARQUET_DIR = Path("pdf_chunks.parquet")
 CHUNK_SIZE = 750
 CHUNK_OVERLAP = 225
 # ----------------------------------------
 
+# --- SETUP NER (spaCy) ---
+try:
+    nlp = spacy.load("en_core_web_sm")
+    print("spaCy NER model loaded successfully.")
+except OSError:
+    print("spaCy model 'en_core_web_sm' not found. NER fallback will be disabled.")
+    print("To enable NER, run: python -m spacy download en_core_web_sm")
+    nlp = None
+# -------------------------
+
+
 # ---------------- UTILITIES ----------------
-_invalid_filename_re = re.compile(r'[\\/*?:"<>|]+')
+_invalid_filename_re = re.compile(r'[\\/*?:\"<>|]+')
 _whitespace_re = re.compile(r'\s+')
 _year_re = re.compile(r'\b(19|20)\d{2}\b')
 
@@ -90,7 +103,6 @@ def extract_metadata_pymupdf(pdf_path: Path) -> Dict[str, str]:
         title = (meta.get("title") or "").strip()
         author = (meta.get("author") or "").strip()
         creation = meta.get("creationDate") or meta.get("modDate") or ""
-        # PyMuPDF creationDate often like "D:YYYYMMDD..."
         year = ""
         if isinstance(creation, str):
             m = re.search(r"D:(\d{4})", creation)
@@ -107,12 +119,9 @@ def extract_metadata_pikepdf(pdf_path: Path) -> Dict[str, str]:
     try:
         with pikepdf.open(pdf_path) as pdf:
             meta = pdf.open_metadata()
-            # XMP keys vary by file — try common ones
-            # dc:title or pdf:Title or title
             title = ""
             author = ""
             year = ""
-            # pikepdf metadata mapping: meta.get("dc:title") etc.
             for k in ("dc:title", "pdf:Title", "Title", "dc:Title"):
                 v = meta.get(k)
                 if v:
@@ -127,7 +136,6 @@ def extract_metadata_pikepdf(pdf_path: Path) -> Dict[str, str]:
                 y = extract_year_from_text(str(meta["xmp:CreateDate"]))
                 if y:
                     year = y
-            # fallback look in raw docinfo too
             if not title or not author or not year:
                 try:
                     docinfo = pdf.docinfo
@@ -203,7 +211,6 @@ def guess_title_and_author_from_lines(lines: List[str]) -> Tuple[str, str]:
     if title_buffer:
         title = " ".join(title_buffer)
 
-    # Author detection
     for i, line in enumerate(lines[:60]):
         if re.match(r'^\s*(by|author)\s*:?\s*$', line, re.I):
             for off in range(1, 4):
@@ -221,9 +228,7 @@ def guess_title_and_author_from_lines(lines: List[str]) -> Tuple[str, str]:
                 break
 
     if not author and title:
-        # fallback: look 10 lines after first title line (title_buffer[0])
         try:
-            # find index of first title_buffer line in lines
             title_first = title_buffer[0]
             title_idx = lines.index(title_first)
             for j in range(title_idx + 1, min(title_idx + 11, len(lines))):
@@ -236,34 +241,67 @@ def guess_title_and_author_from_lines(lines: List[str]) -> Tuple[str, str]:
 
     return title.strip(), author.strip()
 
-# ---------------- AUTHOR / TITLE FORMATTING HELPERS ----------------
-def compact_author_list(author_raw: str, max_authors: int = 3) -> str:
+# ---------------- NER & AUTHOR FORMATTING ----------------
+def extract_author_with_ner(pdf_path: Path) -> str:
+    """
+    Extracts author names from the first page using a NER model.
+    """
+    if not nlp:
+        return ""
+    try:
+        lines = extract_raw_lines(pdf_path, max_pages=1)
+        text = "\n".join(lines)
+        doc = nlp(text)
+        
+        authors = []
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                if len(ent.text.strip().split()) > 1 and len(ent.text.strip()) < 30:
+                    authors.append(ent.text.strip())
+        
+        unique_authors = list(dict.fromkeys(authors))
+        if not unique_authors:
+            return ""
+        return ", ".join(unique_authors)
+    except Exception:
+        return ""
+
+def format_author_list(author_raw: str, max_authors: int = 3) -> str:
+    """
+    Improved version that handles 'Last, First' format and removes affiliations.
+    """
     if not author_raw:
         return "unknown"
-    # split on commas or " and "
-    parts = [p.strip() for p in re.split(r',| and ', author_raw) if p.strip()]
-    # filter out obviously non-name parts
-    cleaned = []
-    for p in parts:
-        # remove affiliation-like phrases (heuristic)
-        if len(p.split()) > 1 and re.search(r'[A-Za-z]', p):
-            cleaned.append(p)
-    if not cleaned:
+
+    author_clean = re.sub(r'\(.*?\)|\[.*?\]', '', author_raw).strip()
+    
+    authors = []
+    author_groups = re.split(r'\s+and\s+', author_clean, flags=re.IGNORECASE)
+    for group in author_groups:
+        authors.extend([p.strip() for p in group.split(',') if p.strip()])
+
+    processed_authors = []
+    for author in authors:
+        parts = [p.strip() for p in author.split(',') if p.strip()]
+        if len(parts) == 2:
+            processed_authors.append(f"{parts[1]} {parts[0]}")
+        elif len(parts) == 1 and len(parts[0].split()) <= 5:
+             processed_authors.append(parts[0])
+
+    if not processed_authors:
         return "unknown"
-    if len(cleaned) > max_authors:
-        return ", ".join(cleaned[:max_authors]) + " et al."
-    return ", ".join(cleaned)
+
+    if len(processed_authors) > max_authors:
+        return ", ".join(processed_authors[:max_authors]) + " et al."
+    return ", ".join(processed_authors)
 
 def choose_concise_title(*candidates: str, min_len: int = 20, max_len: int = 50) -> str:
     cand_list = [c for c in candidates if c and c.strip()]
     if not cand_list:
         return "unknown"
-    # prefer those within desired length
     in_range = [c.strip() for c in cand_list if min_len <= len(c.strip()) <= max_len]
     if in_range:
-        # pick shortest in range (more concise)
         return min(in_range, key=lambda x: len(x))
-    # fallback to shortest non-empty
     return min(cand_list, key=lambda x: len(x.strip()))
 
 # ---------------- PROCESS & RENAME ----------------
@@ -272,8 +310,7 @@ def process_single_pdf(pdf_path: Path, is_thesis: bool) -> Dict[str, Any]:
 
     try:
         title_meta, author_meta, year_meta = merge_metadata(pdf_path)
-        # If thesis, apply thesis logic to get title/author from page content
-
+        
         title_text, author_text = "", ""
         if is_thesis:
             lines = extract_raw_lines(pdf_path, max_pages=2)
@@ -283,31 +320,37 @@ def process_single_pdf(pdf_path: Path, is_thesis: bool) -> Dict[str, Any]:
                 lines = extract_raw_lines(pdf_path, max_pages=1)
                 title_text, _ = guess_title_and_author_from_lines(lines)
 
-        # final selection (concise title preference)
         final_title = choose_concise_title(title_meta, title_text, max_len=120)
-
         if not final_title or final_title.lower() in ("", "unknown"):
             final_title = title_meta or title_text or "unknown"
 
+        # --- New Author Logic ---
+        # 1. Try primary methods first
+        author_primary_raw = author_meta or author_text
+        final_author = format_author_list(author_primary_raw, max_authors=3)
 
-        # authors: prefer metadata if it's a clean name list, otherwise use text-extracted
-        final_author_raw = author_meta or author_text or "unknown"
-        final_author = compact_author_list(final_author_raw, max_authors=3)
+        # 2. If primary methods fail, fall back to NER
+        if final_author.lower() == "unknown":
+            if nlp:
+                author_ner = extract_author_with_ner(pdf_path)
+                if author_ner:
+                    final_author = format_author_list(author_ner, max_authors=3)
+        
+        if not final_author:
+            final_author = "unknown"
+        
         safe_title = sanitize_filename_part(final_title, max_len=80)
         safe_author = sanitize_filename_part(final_author, max_len=60)
         safe_year = sanitize_filename_part(year_meta or "unknown", max_len=8)
 
-        # Build base filename and prefer skipping copy if already present (idempotency)
         base_filename = f"{safe_year}_{safe_title}_{safe_author}.pdf"
         base_filename = truncate_filename(base_filename)
         base_path = OUTPUT_DIR / base_filename
 
         if base_path.exists():
-            # Already processed previously — reuse existing file (skip re-copy)
             print(f"Skipping copy: {pdf_path.name} already processed as {base_path.name}")
             selected_path = base_path
         else:
-            # Ensure unique filename in case of race with other processes, then copy
             selected_path = ensure_unique_filename(base_path)
             try:
                 shutil.copy2(pdf_path, selected_path)
@@ -339,7 +382,7 @@ def process_and_copy_pdfs() -> List[Dict[str, Any]]:
     processed = []
     with ProcessPoolExecutor() as executor:
         futures = {executor.submit(process_single_pdf, p, is_thesis): (p, is_thesis) for p, is_thesis in tasks}
-        for f in tqdm(as_completed(futures), total=len(futures), desc="Processing PDFs"):
+        for f in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Processing PDFs"):
             result = f.result()
             if result and "error" not in result:
                 processed.append(result)
@@ -361,14 +404,12 @@ def get_closest_page_number(chunk_text: str, page_md_chunks: List[Dict[str, Any]
     if not snippet:
         return 0
 
-    # Precompute hashes of page texts
     snippet_hash = hashlib.md5(snippet.encode("utf-8")).hexdigest()
     for page_data in page_md_chunks:
         page_text = page_data.get("text", "")
         if hashlib.md5(page_text[:200].encode("utf-8")).hexdigest() == snippet_hash:
             return page_data.get("metadata", {}).get("page", 0) + 1
 
-    # Fallback: fuzzy matching on first 30 chars
     best_score, best_page = 0.0, 1
     for page_data in page_md_chunks:
         page_text = page_data.get("text", "")
@@ -415,47 +456,35 @@ def chunk_single_pdf(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     
 def chunk_and_save(processed_files: List[Dict[str, Any]]):
     """
-    For each processed PDF, chunk its text and save all chunks to OUTPUT_CSV_PATH.
-    Each chunk has metadata: source_filename, title, author, year, page_number, chunk_text, chunk_metadata
+    For each processed PDF, chunk its text and save chunks to a Parquet file
+    in OUTPUT_PARQUET_DIR. This uses a directory of Parquet files for scalability
+    and efficient, idempotent processing.
     """
-    header_written = Path(OUTPUT_CSV_PATH).exists()
+    OUTPUT_PARQUET_DIR.mkdir(exist_ok=True)
 
-    # Load already-processed filenames from existing CSV, if present
-    processed_filenames = set()
-    if header_written:
-        try:
-            existing_df = pd.read_csv(OUTPUT_CSV_PATH, usecols=["source_filename"])
-            processed_filenames = set(existing_df["source_filename"].unique())
-        except Exception:
-            # if reading fails for any reason, continue with empty set (will attempt chunking)
-            processed_filenames = set()
+    processed_stems = {p.stem for p in OUTPUT_PARQUET_DIR.glob("*.parquet")}
 
-    # Only chunk files that are not already present in the CSV
-    tasks = [info for info in processed_files if info["new_filename"] not in processed_filenames]
+    tasks = [info for info in processed_files if Path(info["new_filename"]).stem not in processed_stems]
     if not tasks:
         print("All PDFs already chunked, skipping.")
         return
 
+    num_new_chunks = 0
     with ProcessPoolExecutor() as executor:
         futures = {executor.submit(chunk_single_pdf, info): info for info in tasks}
-        for f in tqdm(as_completed(futures), total=len(futures), desc="Chunking PDFs"):
+        for f in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Chunking PDFs"):
+            info = futures[f]
             result = f.result()
             if result:
-                # incremental CSV writing instead of keeping all in memory
                 df = pd.DataFrame(result)
-                df.to_csv(
-                    OUTPUT_CSV_PATH,
-                    mode="a",
-                    header=not header_written,
-                    index=False,
-                    encoding="utf-8"
-                )
-                header_written = True
+                output_path = OUTPUT_PARQUET_DIR / f"{Path(info['new_filename']).stem}.parquet"
+                df.to_parquet(output_path, index=False, compression='gzip')
+                num_new_chunks += len(df)
 
-    if header_written:
-        print(f"Chunks appended to {OUTPUT_CSV_PATH}")
+    if num_new_chunks > 0:
+        print(f"Saved {num_new_chunks} new chunks into {OUTPUT_PARQUET_DIR}")
     else:
-        print("No chunks created (no PDFs processed or chunking failed).")
+        print("No new chunks created (no new PDFs to process or chunking failed).")
 
 # ---------------- MAIN ----------------
 def main():
