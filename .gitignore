@@ -8,3 +8,4 @@ LSG papers/
 testing/
 pdf_chunks.csv
 pdf_chunks.parquet/
+.spectroscopy_chromadb/
