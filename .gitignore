@@ -13,3 +13,4 @@ test_retrieval.py
 todo.txt
 trashed/
 .env
+.gradio/
