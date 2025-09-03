@@ -11,3 +11,4 @@ pdf_chunks.parquet/
 .spectroscopy_chromadb/
 test_retrieval.py
 todo.txt
+trashed/
