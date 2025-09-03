@@ -12,3 +12,4 @@ pdf_chunks.parquet/
 test_retrieval.py
 todo.txt
 trashed/
+.env
