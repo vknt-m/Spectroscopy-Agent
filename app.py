@@ -7,6 +7,8 @@ import yaml
 from UI_Gradio import GradioUI as create_ui  # Import the Gradio UI class
 from toolbox.final_answer import FinalAnswerTool
 from toolbox.retrieve_chunks import retrieve_chunks
+from toolbox.create_metadata_filter import create_metadata_filter
+from toolbox.list_collections import list_collections
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,7 +29,7 @@ llm = LiteLLMModel(
 )
 
 # Register your tools
-tools = [retrieve_chunks,final_answer]
+tools = [retrieve_chunks, final_answer, create_metadata_filter, list_collections]
 
 # Load prompts
 with open(config['prompts_file'], 'r') as stream:

@@ -1,6 +1,6 @@
 llm:
   # The user should edit this line with their model's ID
-  model_id: "ollama_chat/gemma3:4b"
+  model_id: "ollama_chat/llama3.2:3b"
   # The user should edit this line with their model's URL
   api_base: "PASTE_YOUR_MODEL_URL_HERE"
   # The user should edit this line with appropriate context length based on their system specifications

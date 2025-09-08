@@ -4,15 +4,16 @@ from chromadb.utils import embedding_functions
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 import os
+import sys # Import sys to read command line arguments
 
 # Configuration
 PARQUET_PATH = "pdf_chunks.parquet"  # Directory of chunked Parquet files
 DB_PATH = ".spectroscopy_chromadb"    # Directory to persist ChromaDB data
-COLLECTION_NAME = "spectroscopy_books_papers"  # Name of the collection in ChromaDB
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # Switched to a more powerful model
+COLLECTION_NAME = "spectroscopy_books_papers"   # A constant holding the current single collection being used.
 
 
-def main():
+def main(collection_name: str = "spectroscopy_books_papers"):
     """
     Main function to load data in batches, generate embeddings, and ingest into ChromaDB
     in a memory-efficient and idempotent way.
@@ -23,7 +24,7 @@ def main():
         model_name=EMBEDDING_MODEL_NAME
     )
     collection = client.get_or_create_collection(
-        name=COLLECTION_NAME,
+        name=collection_name, # Use the parameter here
         embedding_function=embedding_function
     )
 
@@ -41,7 +42,7 @@ def main():
 
     # --- 3. Process and Ingest Files in Batches ---
     total_chunks_ingested = 0
-    print(f"Found {len(parquet_files)} files. Checking for new content to ingest...")
+    print(f"Found {len(parquet_files)} files. Checking for new content to ingest into '{collection_name}'...")
 
     for file_path in tqdm(parquet_files, desc="Ingesting files"):
         try:
@@ -101,9 +102,14 @@ def main():
     else:
         print("No new chunks found to ingest. The database is already up-to-date.")
         
-    print(f"Total chunks in collection '{COLLECTION_NAME}': {collection.count()}")
+    print(f"Total chunks in collection '{collection_name}': {collection.count()}")
     print(f"Your vector database is persisted in the '{DB_PATH}' directory.")
 
 
 if __name__ == "__main__":
-    main()
+    # Allow collection name to be passed as a command-line argument
+    # Example: python Embedding.py my_new_collection
+    if len(sys.argv) > 1:
+        main(collection_name=sys.argv[1])
+    else:
+        main() # Use default collection name
