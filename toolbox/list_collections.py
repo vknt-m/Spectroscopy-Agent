@@ -20,6 +20,6 @@ def list_collections() -> str:
         
         # Extract names from the Collection objects
         collection_names = [collection.name for collection in collections]
-        return ", ".join(collection_names)
+        return ", ".join(str(collection_names))
     except Exception as e:
         return f"An error occurred while listing collections: {e}"

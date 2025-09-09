@@ -9,6 +9,7 @@ from toolbox.final_answer import FinalAnswerTool
 from toolbox.retrieve_chunks import retrieve_chunks
 from toolbox.create_metadata_filter import create_metadata_filter
 from toolbox.list_collections import list_collections
+from toolbox.list_items_from_collection import list_items_from_collection
 
 # Load environment variables from .env file
 load_dotenv()
@@ -29,7 +30,7 @@ llm = LiteLLMModel(
 )
 
 # Register your tools
-tools = [retrieve_chunks, final_answer, create_metadata_filter, list_collections]
+tools = [retrieve_chunks, final_answer, create_metadata_filter, list_collections, list_items_from_collection]
 
 # Load prompts
 with open(config['prompts_file'], 'r') as stream:
