@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from smolagents import CodeAgent,DuckDuckGoSearchTool, load_tool,LiteLLMModel #HfApiModel, OpenAIServerModel
 import requests
 import yaml
-
+import sys
 from UI_Gradio import GradioUI as create_ui  # Import the Gradio UI class
 from toolbox.final_answer import FinalAnswerTool
 from toolbox.retrieve_chunks import retrieve_chunks
@@ -65,9 +65,9 @@ def run_ui():
     ui.launch(debug=True, share=True)
 
 if __name__ == "__main__":
-    import sys
+    
     run_ui()
     #if len(sys.argv) > 1 and sys.argv[1] == "--ui":
     #    run_ui()
     #else:
-    #    run_cli()
+    #run_cli()

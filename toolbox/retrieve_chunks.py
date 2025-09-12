@@ -42,5 +42,5 @@ def retrieve_chunks(query: str, collection_name: str, n_results: int = 5, metada
     for res in results:
         rerank_info = f" (Re-rank Score: {res['rerank_score']:.4f})" if 'rerank_score' in res else ""
         distance_info = f" (Distance: {res['distance']:.4f})"
-        out.append(f"[{res['id']}] (Page {res['page']}){distance_info}{rerank_info}\nText: {res['text'][:350]}...")
+        out.append(f"[{res['id']}] (Source: {res['source']}, Page: {res['page']}){distance_info}{rerank_info}\nText: {res['text'][:350]}...")
     return "\n\n".join(out)

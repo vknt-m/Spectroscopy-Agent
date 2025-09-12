@@ -9,11 +9,13 @@ spacy>=3.7.0  # For NER fallback
 # PDF Processing
 pymupdf4llm>=0.0.5
 langchain-text-splitters>=0.0.1
+pikepdf>=8.13.0
 
 # Data Processing
 pandas>=1.5.0
 tqdm>=4.65.0
 PyYAML>=6.0
+pyarrow>=15.0.0
 
 # UI
 gradio>=4.0.0

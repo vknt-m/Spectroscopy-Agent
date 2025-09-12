@@ -1,10 +1,10 @@
 llm:
   # The user should edit this line with their model's ID
-  model_id: "ollama_chat/llama3.2:3b"
+  model_id:  "ollama_chat/qwen2.5-coder:7b"       #"ollama_chat/llama3.2:3b"
   # The user should edit this line with their model's URL
   api_base: "PASTE_YOUR_MODEL_URL_HERE"
   # The user should edit this line with appropriate context length based on their system specifications
-  num_ctx: 24576
+  num_ctx: 8192    # e.g., 4096, 8192, 16384,24576, 32768 etc.
 
 agent:
   max_steps: 6
