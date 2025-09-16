@@ -48,7 +48,7 @@ def retrieve_from_collection(query_text: str, collection_name: str, n_results: i
     query_with_instruction = f"Represent this sentence for searching relevant passages: {query_text}"
 
     # If re-ranking, fetch more initial candidates to give the re-ranker a better pool to choose from.
-    num_candidates = n_results * 5 if use_reranker else n_results
+    num_candidates = n_results * 3 if use_reranker else n_results
 
     results = collection.query(
         query_texts=[query_with_instruction],
@@ -71,8 +71,8 @@ def retrieve_from_collection(query_text: str, collection_name: str, n_results: i
             
             'id': results['ids'][0][i],
             'text': results['documents'][0][i],
-            'source': results['metadatas'][0][i].get('sourcefilename', 'N/A'),
-            'page': results['metadatas'][0][i].get('pagenumber', 'N/A'),
+            'source': results['metadatas'][0][i].get('source_filename', 'N/A'),
+            'page': results['metadatas'][0][i].get('page_number', 'N/A'),
             'distance': round(results['distances'][0][i], 4)
         }
         retrieved_chunks.append(chunk_info)
