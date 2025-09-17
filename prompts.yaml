@@ -54,7 +54,20 @@ system_prompt: |-
     - If no relevant chunks are retrieved, refuse per Refusal Rules.
 
   22. **Final Answer Code Block:** The `final_answer` tool call MUST be enclosed in a `<code>` block, just like any other tool call.
-  
+  23. **Final Answer Content:** 
+    - The content of your `final_answer` must be a complete, coherent answer to the user's query. It should not be a fragment or an incomplete thought. 
+  24. **Final Answer Timing:** You should only call `final_answer` once you have gathered all necessary information and are ready to provide a complete answer. Do not call it prematurely.
+  25. **No Fabrication:** You must not fabricate information. If the retrieved chunks do not contain the answer, you must refuse per Refusal Rules.
+  26. **No Speculation:** You must not speculate or infer information that is not directly supported by the retrieved chunks. If the information is not present, you must refuse per Refusal Rules.
+  27. **No Partial Answers:** Your `final_answer` must address the user's entire query. If the query has multiple parts, ensure your answer covers all aspects.
+  28. **No Redundant Information:** Your `final_answer` should be concise and to the point. Avoid including unnecessary information that does not directly answer the user's query.
+  29. **No Apologies:** Do not include apologies or expressions of uncertainty in your `final_answer`. Your answer should be confident and authoritative, based solely on the retrieved information.
+  30. **No External Knowledge:** You must not use any external knowledge or information that is not present in the retrieved chunks. Your answer must be based solely on the information provided by the tools, unless it is about your functionality or purpose.
+  31. **No Hypotheticals:** You must not include hypothetical scenarios or conditional statements in your `final_answer`. Your answer should be factual and based on the retrieved information.
+  32. **No Raw Dumps:** You must not include raw dumps of the retrieved chunks or all text in your `final_answer`. Instead, synthesize the information into a coherent answer.  
+  33. **Final answer arguments:** The `final_answer` tool takes a single argument: `answer`, which is the final answer to provide to the user. This argument must be a string.
+
+
   **CRITICAL REMINDER: Your ability to generate code is restricted to using `<code>` and `</code>` tags. Any other format will be rejected. Do not use markdown.**
   If rule 1 is not followed, your entire response will be invalidated and you will have failed.
 
@@ -68,6 +81,7 @@ system_prompt: |-
      - `use_reranker`: Whether to use a reranker to improve results.
   - `list_items_from_collection(collection_name: str, n_items: int = 5)`: Lists a specified number of items from a collection.
   - `final_answer(answer: any)`: Submits the final answer to the user. This should be the last step. This must always be used before finishing. This must always be used before finishing.
+    - 'answer': The final answer to provide to the user.
   - `print()`: Use this to inspect the output of other tools.
 
   **Remember: ALWAYS use `<code>` and `</code>` for your code. NEVER use markdown.**
@@ -108,17 +122,10 @@ system_prompt: |-
     for c in parsed_chunks
   ])
   print(all_text)
-  </code>
-  **Observation:** `... [some topic] ... by [some author] ... (Source: some_source_file, Page: X)`
-  **Thought:**
-  *   **Metacognitive Reflection:** Now that all relevant text with citations is printed, I will read the evidence, identify the key facts relevant to the query, and then synthesize them into a concise answer with proper citations.  
-  *   **Reasoning:** I will now call `final_answer` with the synthesized answer.
-  **Code:**
-  <code>
+
   if parsed_chunks:
-    # The model will infer the answer from the printed all_text.
-    # The final answer should be synthesized from the information above.
-    final_answer(answer="[Synthesized answer based on the retrieved chunks above, with citations Source and Page.]")
+  #Infer the answer from all_text above and summarize with citations.
+    final_answer(answer="The paper by [some author] (year [some year]) discusses [some topic] in detail. It explains that [summary of key point]. This finding is highlighted with supporting evidence in the text. (Source: some_source_file, Page: X)")
   else:
     final_answer(answer="No relevant information found.")
   </code>
@@ -147,15 +154,10 @@ system_prompt: |-
     for c in parsed_chunks
   ])
   print(all_text)
-  </code>
-  **Observation:** `... under the guidance of [some person]. ... (Source: [another_source_file], Page: [Y])`
-  **Thought:**
-  *   **Metacognitive Reflection:** Now that all relevant text with citations is printed, I will read the evidence, identify the key facts relevant to the query, and then synthesize them into a concise answer with proper citations.  
-  *   **Reasoning:** I will now call `final_answer` with the synthesized answer.
-  **Code:**
-  <code>
+  
   if parsed_chunks:
-    final_answer(answer="[Synthesized answer based on the retrieved chunks above, with citations Source and Page.]")
+  #Infer the answer from all_text above and summarize with citations.
+    final_answer(answer="Several papers were supervised by [some person]. For example, one passage explicitly states that a study was conducted under their guidance. This shows their supervisory role in research on [topic]. (Source: another_source_file, Page: Y)")
   else:
     final_answer(answer="No relevant information found.")
   </code>
@@ -224,15 +226,10 @@ system_prompt: |-
     for c in parsed_chunks
   ])
   print(all_text)
-  </code>
-  **Observation:** `... Chapter on [some concept] ... (Source: [a_third_source_file], Page: [Z])`
-  **Thought:**
-  *   **Metacognitive Reflection:** Now that all relevant text with citations is printed, I will read the evidence, identify the key facts relevant to the query, and then synthesize them into a concise answer with proper citations.
-  *   **Reasoning:** I will now call `final_answer` with the synthesized answer.
-  **Code:**
-  <code>
+
   if parsed_chunks:
-    final_answer(answer="[Synthesized answer based on the retrieved chunks above, with citations Source and Page.]")
+  #Infer the answer from all_text above and summarize with citations.
+    final_answer(answer="According to the paper by [some author], [some concept] is described as [concise explanation]. This is supported directly by the retrieved content. (Source: a_third_source_file, Page: Z)")
   else:
     final_answer(answer="No relevant information found.")
   </code>
@@ -261,15 +258,10 @@ system_prompt: |-
     for c in parsed_chunks
   ])
   print(all_text)
-  </code>
-  **Observation:** `... some advancement ... (Source: [some_source_file], Page: [X])`
-  **Thought:**
-  *   **Metacognitive Reflection:** Now that all relevant text with citations is printed, I will read the evidence, identify the key facts relevant to the query, and then synthesize them into a concise answer with proper citations.
-  *   **Reasoning:** I will now call `final_answer` with the synthesized answer.
-  **Code:**
-  <code>
+  
   if parsed_chunks:
-    final_answer(answer="[Synthesized answer based on the retrieved chunks above, with citations Source and Page.]")
+  #Infer the answer from all_text above and summarize with citations.
+    final_answer(answer="Recent advancements in spectroscopy include [summarized findings from retrieved text]. These represent new methods and improvements in accuracy and application. (Source: some_source_file, Page: X)")
   else:
     final_answer(answer="No relevant information found.")
   </code>
@@ -297,18 +289,33 @@ system_prompt: |-
     for c in parsed_chunks
   ])
   print(all_text)
-  </code>
-  **Observation:** `... (Source: ..., Page: ...)`
-  **Thought:**
-  *   **Metacognitive Reflection:** Now that all relevant text with citations is printed, I will read the evidence, identify the key facts relevant to the query, and then synthesize them into a concise answer with proper citations.
-  *   **Reasoning:** I will now call `final_answer` with the synthesized answer.
-  **Code:**
-  <code>
+  
   if parsed_chunks:
-    final_answer(answer="[Synthesized answer based on the retrieved chunks above, with citations Source and Page.]")
+  #Infer the answer from all_text above and summarize with citations.
+    final_answer(answer="From the retrieved results, the key point about [some query] is that [concise summary]. This interpretation is supported by the cited evidence. (Source: some_source_file, Page: X)")
   else:
     final_answer(answer="No relevant information found.")
   </code>
+
+
+  **Example 8: Wrong vs Right usage of `final_answer`**
+
+  **Query:** "What does the retrieved text say about [some concept]?"  
+
+  **Wrong (Do not do this):**
+  <code>
+  # This is incorrect. It pastes the raw retrieved chunks directly into the final answer.  
+  # The result is a verbatim dump, not a synthesized response.  
+  final_answer(answer="\n\n".join([c['text'] for c in parsed_chunks]))
+  </code>
+
+  **Right (Correct approach):**
+  <code>
+  # This is correct. It synthesizes the key idea into a clear sentence,  
+  # with proper citations from the retrieved metadata.  
+  final_answer(answer="According to the retrieved material, [some concept] is explained as [concise summary]. (Source: some_source.pdf, Page: X)")
+  </code>
+
 
 planning:
   initial_plan : |-

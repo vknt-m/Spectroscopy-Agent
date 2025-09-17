@@ -2,9 +2,8 @@ from smolagents import tool
 from Retrieval import retrieve_from_collection
 import json
 
-from smolagents import tool
-from Retrieval import retrieve_from_collection
-import json
+def safe_text(s: str) -> str:
+    return s.replace('"', "'").replace("\n", " ")
 
 @tool
 def retrieve_chunks(query: str, collection_name: str, n_results: int = 5, metadata_filter: dict = None, use_reranker: bool = False) -> str:
@@ -45,6 +44,7 @@ def retrieve_chunks(query: str, collection_name: str, n_results: int = 5, metada
             sanitized_res['distance'] = float(sanitized_res['distance'])
         if 'rerank_score' in sanitized_res and sanitized_res['rerank_score'] is not None:
             sanitized_res['rerank_score'] = float(sanitized_res['rerank_score'])
+        sanitized_res['text'] = safe_text(sanitized_res.get('text', ''))
         sanitized_results.append(sanitized_res)
 
     return json.dumps(sanitized_results)
