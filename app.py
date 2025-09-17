@@ -43,6 +43,7 @@ agent = CodeAgent(
     prompt_templates=prompt_templates,
     verbosity_level=config['agent']['verbosity_level'],
     max_steps=config['agent']['max_steps'],
+    additional_authorized_imports=['json'],
 )
 
 def run_cli():
