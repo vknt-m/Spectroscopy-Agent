@@ -13,7 +13,7 @@ EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 RERANKER_MODEL = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
 
-def retrieve_from_collection(query_text: str, collection_name: str, n_results: int = 3, metadata_filter: dict = None, use_reranker: bool = False):
+def retrieve_from_collection(query_text: str, collection_name: str, n_results: int = 5, metadata_filter: dict = None, use_reranker: bool = False):
     """
     Queries a SPECIFIC ChromaDB collection to find the most relevant chunks.
 

@@ -7,7 +7,7 @@ llm:
   num_ctx: 8192    # e.g., 4096, 8192, 16384,24576, 32768 etc.
 
 agent:
-  max_steps: 6
+  max_steps: 8
   verbosity_level: 2
 
 prompts_file: "prompts.yaml"
