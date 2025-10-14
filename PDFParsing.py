@@ -13,19 +13,25 @@ PDFParsing - production-ready pipeline
 import os
 import re
 import shutil
+import json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-import pyarrow  # for Parquet support
 import fitz  # PyMuPDF
+import pandas as pd
 import pikepdf
 import pymupdf4llm
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-import pandas as pd
+import pyarrow  # for Parquet support
 import tqdm
 import spacy
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from SchemaHandler import SchemaHandler
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+
+
+
+
 
 # ---------------- CONFIG ----------------
 PDF_DIR = Path("docs_pdfs")
@@ -35,7 +41,7 @@ OUTPUT_DIR = PDF_DIR / "papers"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Output will be a directory of parquet files for efficiency and scalability
-OUTPUT_PARQUET_DIR = Path("pdf_chunks.parquet")
+OUTPUT_PARQUET_DIR = Path("pdf_chunks_parquet")
 CHUNK_SIZE = 750
 CHUNK_OVERLAP = 225
 # ----------------------------------------
@@ -45,14 +51,14 @@ try:
     nlp = spacy.load("en_core_web_sm")
     print("spaCy NER model loaded successfully.")
 except OSError:
-    print("spaCy model 'en_core_web_sm' not found. NER fallback will be disabled.")
+    print("spaCy model \'en_core_web_sm\' not found. NER fallback will be disabled.")
     print("To enable NER, run: python -m spacy download en_core_web_sm")
     nlp = None
 # -------------------------
 
 
 # ---------------- UTILITIES ----------------
-_invalid_filename_re = re.compile(r'[\\/*?:\"<>|]+')
+_invalid_filename_re = re.compile(r'[\\/*?:"<>|]+')
 _whitespace_re = re.compile(r'\s+')
 _year_re = re.compile(r'\b(19|20)\d{2}\b')
 
@@ -68,7 +74,7 @@ def sanitize_filename_part(s: str, max_len: int = 120) -> str:
     return s[:max_len]
 
 def truncate_filename(fullname: str, max_len: int = 180) -> str:
-    """Ensure total filename length doesn't exceed OS limits (255 is max, we keep buffer)."""
+    """Ensure total filename length doesn\'t exceed OS limits (255 is max, we keep buffer)."""
     if len(fullname) <= max_len:
         return fullname
     base, ext = os.path.splitext(fullname)
@@ -419,7 +425,6 @@ def get_closest_page_number(chunk_text: str, page_md_chunks: List[Dict[str, Any]
             best_page = page_data.get("metadata", {}).get("page", 0) + 1
     return best_page
 
-
 def chunk_single_pdf(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     pdf_filename = info["new_filename"]
     pdf_path = OUTPUT_DIR / pdf_filename
@@ -454,7 +459,7 @@ def chunk_single_pdf(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         print(f"Warning: failed chunking {pdf_filename}, see errors.log for details.")
         return []
     
-def chunk_and_save(processed_files: List[Dict[str, Any]]):
+def chunk_and_save(processed_files: List[Dict[str, Any]], schema_handler: SchemaHandler):
     """
     For each processed PDF, chunk its text and save chunks to a Parquet file
     in OUTPUT_PARQUET_DIR. This uses a directory of Parquet files for scalability
@@ -466,7 +471,22 @@ def chunk_and_save(processed_files: List[Dict[str, Any]]):
 
     tasks = [info for info in processed_files if Path(info["new_filename"]).stem not in processed_stems]
     if not tasks:
-        print("All PDFs already chunked, skipping.")
+        print("All PDFs already chunked, ensuring schema is up-to-date.")
+        for info in processed_files:
+            filename = info['new_filename']
+            parquet_path = OUTPUT_PARQUET_DIR / f'{Path(filename).stem}.parquet'
+            if parquet_path.exists():
+                try:
+                    df = pd.read_parquet(parquet_path)
+                    info['num_chunks'] = len(df)
+                    schema_handler.update_entry(info, status="processed")
+                except Exception as e:
+                    print(f"Warning: Could not read parquet for {filename} to update chunk count: {e}")
+                    info['num_chunks'] = 0 # Set to 0 if parquet is unreadable
+                    schema_handler.update_entry(info, status="processing_failed")
+            else:
+                info['num_chunks'] = 0 # Parquet file missing
+                schema_handler.update_entry(info, status="processing_failed")
         return
 
     num_new_chunks = 0
@@ -479,21 +499,48 @@ def chunk_and_save(processed_files: List[Dict[str, Any]]):
                 df = pd.DataFrame(result)
                 output_path = OUTPUT_PARQUET_DIR / f"{Path(info['new_filename']).stem}.parquet"
                 df.to_parquet(output_path, index=False, compression='gzip')
+                # Update info with the number of chunks and set status
+                info['num_chunks'] = len(df)
+                schema_handler.update_entry(info, status="processed")
                 num_new_chunks += len(df)
+            else:
+                # If chunking failed, still update the schema with 0 chunks and an error status
+                info['num_chunks'] = 0
+                schema_handler.update_entry(info, status="processing_failed")
 
     if num_new_chunks > 0:
         print(f"Saved {num_new_chunks} new chunks into {OUTPUT_PARQUET_DIR}")
     else:
         print("No new chunks created (no new PDFs to process or chunking failed).")
 
+
+
+
 # ---------------- MAIN ----------------
 def main():
+    """
+    Main pipeline:
+    1. Process and copy PDFs to a clean directory.
+    2. Initialize the SchemaHandler.
+    3. Chunk the text of new/modified PDFs and update the schema.
+    4. Save the final schema.
+    """
+    # 1. Process and copy PDFs
     processed_files = process_and_copy_pdfs()
     if not processed_files:
-        print("No PDFs processed. Check folders.")
+        print("No PDFs found to process. Exiting.")
         return
-    chunk_and_save(processed_files)
-    print("Done.")
+
+    # 2. Initialize the Schema Handler
+    schema_handler = SchemaHandler()
+
+    # 3. Chunk new files and update the schema
+    chunk_and_save(processed_files, schema_handler)
+
+    # 4. Save the final, updated schema to disk
+    schema_handler.save()
+    
+    print("\nPDF processing and chunking complete. Schema has been updated.")
 
 if __name__ == "__main__":
     main()

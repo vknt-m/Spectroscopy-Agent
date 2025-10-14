@@ -8,6 +8,8 @@ LSG papers/
 testing/
 pdf_chunks.csv
 pdf_chunks.parquet/
+pdf_chunks_parquet/
+
 .spectroscopy_chromadb/
 test_retrieval.py
 todo.txt
@@ -17,3 +19,11 @@ trashed/
 chunks.csv
 collections.txt
 data_exporter.py
+
+# Generated schema files
+info_schema.json
+info_schema.md
+
+notes.md
+chat_history.md
+smolagents_summary.md

@@ -2,12 +2,15 @@ import pandas as pd
 import chromadb
 from chromadb.utils import embedding_functions
 from sentence_transformers import SentenceTransformer
+from pathlib import Path
 from tqdm import tqdm
 import os
 import sys # Import sys to read command line arguments
+from SchemaHandler import SchemaHandler
 
 # Configuration
-PARQUET_PATH = "pdf_chunks.parquet"  # Directory of chunked Parquet files
+PARQUET_PATH = Path("pdf_chunks_parquet")  # Directory of chunked Parquet files
+
 DB_PATH = ".spectroscopy_chromadb"    # Directory to persist ChromaDB data
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # Switched to a more powerful model
 COLLECTION_NAME = "spectroscopy_books_papers"   # A constant holding the current single collection being used.
@@ -16,57 +19,64 @@ COLLECTION_NAME = "spectroscopy_books_papers"   # A constant holding the current
 def main(collection_name: str = "spectroscopy_books_papers"):
     """
     Main function to load data in batches, generate embeddings, and ingest into ChromaDB
-    in a memory-efficient and idempotent way.
+    in a memory-efficient and idempotent way, using SchemaHandler for tracking.
     """
-    # --- 1. Initialize ChromaDB Client and Embedding Function ---
+    # --- 1. Initialize SchemaHandler ---
+    schema_handler = SchemaHandler()
+
+    # --- 2. Initialize ChromaDB Client and Embedding Function ---
     client = chromadb.PersistentClient(path=DB_PATH)
     embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL_NAME
     )
     collection = client.get_or_create_collection(
-        name=collection_name, # Use the parameter here
+        name=collection_name,
         embedding_function=embedding_function
     )
 
-    # --- 2. Get list of files to process ---
-    try:
-        parquet_files = [os.path.join(PARQUET_PATH, f) for f in os.listdir(PARQUET_PATH) if f.endswith('.parquet')]
-        if not parquet_files:
-            print(f"No .parquet files found in '{PARQUET_PATH}'.")
-            print("Please ensure you have run the parsing and chunking script first.")
-            return
-    except FileNotFoundError:
-        print(f"Error: The directory '{PARQUET_PATH}' was not found.")
-        print("Please ensure you have run the parsing and chunking script first.")
+    # --- 3. Get list of files to process from schema ---
+    pending_files_df = schema_handler.get_pending_embeddings()
+    if pending_files_df.empty:
+        print("No new or updated files found in schema for embedding. Database is up-to-date.")
         return
 
-    # --- 3. Process and Ingest Files in Batches ---
-    total_chunks_ingested = 0
-    print(f"Found {len(parquet_files)} files. Checking for new content to ingest into '{collection_name}'...")
+    print(f"Found {len(pending_files_df)} files in schema pending embedding. Ingesting into '{collection_name}'...")
 
-    for file_path in tqdm(parquet_files, desc="Ingesting files"):
+    total_chunks_ingested = 0
+    for index, row in tqdm(pending_files_df.iterrows(), total=len(pending_files_df), desc="Embedding files"):
+        filename = row['filename']
+        parquet_file_path = PARQUET_PATH / f'{Path(filename).stem}.parquet'
+
+        if not parquet_file_path.exists():
+            print(f"Warning: Parquet file for '{filename}' not found at '{parquet_file_path}'. Skipping.")
+            schema_handler.update_entry({'filename': filename}, status="parquet_missing")
+            continue
+
         try:
-            df = pd.read_parquet(file_path)
+            df = pd.read_parquet(parquet_file_path)
             if df.empty:
+                print(f"Warning: Parquet file for '{filename}' is empty. Skipping.")
+                schema_handler.update_entry({'filename': filename}, status="empty_parquet")
                 continue
 
             # --- Idempotency Check ---
-            # 1. Generate potential IDs for all chunks in the current file
-            potential_ids = [f"{row['source_filename']}_{row['page_number']}_{i}" for i, row in df.iterrows()]
+            # Generate potential IDs for all chunks in the current file
+            potential_ids = [f"{row_df['source_filename']}_{row_df['page_number']}_{i}" for i, row_df in df.iterrows()]
 
-            # 2. Check which of these IDs already exist in the database
-            existing_ids_response = collection.get(ids=potential_ids, include=[])  # Only need IDs, no embeddings or metadata
+            # Check which of these IDs already exist in the database
+            existing_ids_response = collection.get(ids=potential_ids, include=[])
             existing_ids = set(existing_ids_response['ids'])
 
-            # 3. Filter the DataFrame to only include new, non-existent chunks
+            # Filter the DataFrame to only include new, non-existent chunks
             if existing_ids:
                 df['potential_id'] = potential_ids
                 new_chunks_df = df[~df['potential_id'].isin(existing_ids)]
             else:
-                new_chunks_df = df # If no IDs existed, the whole dataframe is new
+                new_chunks_df = df
 
-            # 4. If there are no new chunks in this file, skip to the next one
             if new_chunks_df.empty:
+                print(f"No new chunks to ingest for '{filename}'. Marking as embedded.")
+                schema_handler.mark_embedded(filename) # Mark as embedded even if no new chunks
                 continue
 
             # --- Process and Ingest only the New Chunks ---
@@ -79,10 +89,7 @@ def main(collection_name: str = "spectroscopy_books_papers"):
             metadatas = new_chunks_df[["source_filename", "title", "author", "year", "page_number"]].to_dict('records')
             
             # Use the pre-generated potential_ids that correspond to the new chunks
-            if existing_ids:
-                ids_to_add = new_chunks_df['potential_id'].tolist()
-            else:
-                ids_to_add = potential_ids
+            ids_to_add = new_chunks_df['potential_id'].tolist() if existing_ids else potential_ids
 
             collection.add(
                 documents=documents,
@@ -90,10 +97,11 @@ def main(collection_name: str = "spectroscopy_books_papers"):
                 ids=ids_to_add
             )
             total_chunks_ingested += len(new_chunks_df)
+            schema_handler.mark_embedded(filename) # Mark as embedded after successful ingestion
 
         except Exception as e:
-            print(f"\nError processing file {os.path.basename(file_path)}: {e}")
-            print("Skipping this file.")
+            print(f"\nError processing file '{filename}': {e}")
+            schema_handler.update_entry({'filename': filename}, status="embedding_failed")
             continue
 
     print("\n--- Ingestion Complete! ---")
@@ -105,6 +113,8 @@ def main(collection_name: str = "spectroscopy_books_papers"):
     print(f"Total chunks in collection '{collection_name}': {collection.count()}")
     print(f"Your vector database is persisted in the '{DB_PATH}' directory.")
 
+    # Save the updated schema
+    schema_handler.save()
 
 if __name__ == "__main__":
     # Allow collection name to be passed as a command-line argument
