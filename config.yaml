@@ -4,7 +4,7 @@ llm:
   # The user should edit this line with their model's URL
   api_base: "PASTE_YOUR_MODEL_URL_HERE"
   # The user should edit this line with appropriate context length based on their system specifications
-  num_ctx: 8192    # e.g., 4096, 8192, 16384,24576, 32768 etc.
+  num_ctx: 32768    # e.g., 4096, 8192, 16384,24576, 32768 etc.
 
 agent:
   max_steps: 8
