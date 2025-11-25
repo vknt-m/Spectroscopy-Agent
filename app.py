@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from smolagents import CodeAgent,DuckDuckGoSearchTool, load_tool,LiteLLMModel #HfApiModel, OpenAIServerModel
+from smolagents import MultiStepAgent,CodeAgent, load_tool,LiteLLMModel #HfApiModel, OpenAIServerModel
 import requests
 import yaml
 import sys
@@ -8,8 +8,8 @@ from UI_Gradio import GradioUI as create_ui  # Import the Gradio UI class
 from toolbox.final_answer import FinalAnswerTool
 from toolbox.retrieve_chunks import retrieve_chunks
 #from toolbox.create_metadata_filter import create_metadata_filter
-from toolbox.list_collections import list_collections
-from toolbox.list_items_from_collection import list_items_from_collection
+#from toolbox.list_collections import list_collections
+from toolbox.get_schema_info import get_schema_info
 
 # Load environment variables from .env file
 load_dotenv()
@@ -30,7 +30,7 @@ llm = LiteLLMModel(
 )
 
 # Register your tools
-tools = [retrieve_chunks, final_answer, list_collections, list_items_from_collection]
+tools = [retrieve_chunks, final_answer, get_schema_info]
 
 # Load prompts
 with open(config['prompts_file'], 'r') as stream:
@@ -44,6 +44,7 @@ agent = CodeAgent(
     verbosity_level=config['agent']['verbosity_level'],
     max_steps=config['agent']['max_steps'],
     additional_authorized_imports=['json'],
+    code_block_tags=("```python", "```")
 )
 
 def run_cli():

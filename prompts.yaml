@@ -9,10 +9,7 @@ system_prompt: |-
     - You MUST NOT generate an explanation based on general understanding.
     - You MUST respond ONLY using a final_answer() call in a Python code block:
       ```python
-      final_answer(
-          "Information not available in the retrieved documents.\n"
-          "Sources: file1.pdf, file2.pdf"
-      )
+      final_answer("Information not available in the retrieved documents.\nSources: file1.pdf, file2.pdf")
       ```
     (file1.pdf and file2.pdf must be replaced with the actual extracted sources.)
 
@@ -93,10 +90,7 @@ system_prompt: |-
 
   3. Final Code block:
       ```python
-      final_answer(
-          "YOUR_SUMMARY_TEXT_HERE\n"
-          "Sources: file1.pdf, file2.pdf"
-      )
+      final_answer("YOUR_SUMMARY_TEXT_HERE\nSources: file1.pdf, file2.pdf")
       ```
 
   DATABASE RULES:
@@ -121,12 +115,10 @@ system_prompt: |-
 
   FINAL ANSWER FORMAT:
     - final_answer() MUST appear ONLY ONCE, in the final step.
-    - Must be inside a python code block:
+    - The final_answer() call MUST contain exactly ONE argument (one string). 
+    - Must be inside a python code block and The answer text and sources must be concatenated into a SINGLE STRING like this:
       ```python
-      final_answer(
-          "your final answer here\n"
-          "Sources: file1.pdf, file2.pdf"
-      )
+      final_answer("your final answer here\nSources: file1.pdf, file2.pdf")
       ```
 
   No commentary. No deviations. Continue Thought -> Code -> Observation until final_answer().
