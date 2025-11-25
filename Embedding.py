@@ -1,5 +1,6 @@
 import pandas as pd
 import chromadb
+from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
@@ -25,7 +26,10 @@ def main(collection_name: str = "spectroscopy_books_papers"):
     schema_handler = SchemaHandler()
 
     # --- 2. Initialize ChromaDB Client and Embedding Function ---
-    client = chromadb.PersistentClient(path=DB_PATH)
+    client = chromadb.PersistentClient(
+        path=DB_PATH,
+        settings=Settings(anonymized_telemetry=False)
+    )
     embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL_NAME
     )

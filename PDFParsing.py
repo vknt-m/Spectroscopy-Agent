@@ -47,13 +47,9 @@ CHUNK_OVERLAP = 225
 # ----------------------------------------
 
 # --- SETUP NER (spaCy) ---
-try:
-    nlp = spacy.load("en_core_web_sm")
-    print("spaCy NER model loaded successfully.")
-except OSError:
-    print("spaCy model \'en_core_web_sm\' not found. NER fallback will be disabled.")
-    print("To enable NER, run: python -m spacy download en_core_web_sm")
-    nlp = None
+# The spaCy model is loaded lazily in the worker processes to avoid
+# loading it multiple times in the main process.
+nlp = None
 # -------------------------
 
 
@@ -128,12 +124,12 @@ def extract_metadata_pikepdf(pdf_path: Path) -> Dict[str, str]:
             title = ""
             author = ""
             year = ""
-            for k in ("dc:title", "pdf:Title", "Title", "dc:Title"):
+            for k in ("dc:title", "pdf:Title", "Title"):
                 v = meta.get(k)
                 if v:
                     title = str(v).strip()
                     break
-            for k in ("dc:creator", "pdf:Author", "Author", "dc:creator"):
+            for k in ("dc:creator", "pdf:Author", "Author"):
                 v = meta.get(k)
                 if v:
                     author = str(v).strip()
@@ -251,20 +247,32 @@ def guess_title_and_author_from_lines(lines: List[str]) -> Tuple[str, str]:
 def extract_author_with_ner(pdf_path: Path) -> str:
     """
     Extracts author names from the first page using a NER model.
+    Loads the model on first use in a worker process.
     """
-    if not nlp:
+    global nlp
+    if nlp is None:
+        try:
+            # Using a smaller, more efficient model suitable for this task
+            nlp = spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
+        except OSError:
+            print("Warning: spaCy model 'en_core_web_sm' not found. Please run 'python -m spacy download en_core_web_sm'")
+            nlp = False  # Mark as failed to avoid retrying
+            return ""
+
+    if nlp is False:  # If loading failed previously
         return ""
+
     try:
         lines = extract_raw_lines(pdf_path, max_pages=1)
         text = "\n".join(lines)
         doc = nlp(text)
-        
+
         authors = []
         for ent in doc.ents:
             if ent.label_ == "PERSON":
                 if len(ent.text.strip().split()) > 1 and len(ent.text.strip()) < 30:
                     authors.append(ent.text.strip())
-        
+
         unique_authors = list(dict.fromkeys(authors))
         if not unique_authors:
             return ""
@@ -337,10 +345,9 @@ def process_single_pdf(pdf_path: Path, is_thesis: bool) -> Dict[str, Any]:
 
         # 2. If primary methods fail, fall back to NER
         if final_author.lower() == "unknown":
-            if nlp:
-                author_ner = extract_author_with_ner(pdf_path)
-                if author_ner:
-                    final_author = format_author_list(author_ner, max_authors=3)
+            author_ner = extract_author_with_ner(pdf_path)
+            if author_ner:
+                final_author = format_author_list(author_ner, max_authors=3)
         
         if not final_author:
             final_author = "unknown"
@@ -525,6 +532,12 @@ def main():
     3. Chunk the text of new/modified PDFs and update the schema.
     4. Save the final schema.
     """
+    # Force UTF-8 for stdout and stderr to prevent encoding errors on Windows
+    import sys
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    
     # 1. Process and copy PDFs
     processed_files = process_and_copy_pdfs()
     if not processed_files:
