@@ -112,7 +112,7 @@ def main():
         return
 
     print("\n\n==========================================")
-    print("✅ Pipeline completed successfully!")
+    print("Pipeline completed successfully!")
     print("Your new documents have been processed and added to the vector database.")
     print("==========================================")
 

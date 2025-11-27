@@ -1,6 +1,9 @@
 # ui_module.py
 import gradio as gr
 from typing import Any
+import subprocess
+import sys
+from pathlib import Path
 
 class GradioUI:
     """
@@ -20,40 +23,32 @@ class GradioUI:
     # UI_Gradio.py - Modified chat_handler method
     def chat_handler(self, user_msg: str, history: list):
         """
-        Handles user messages and sends them to the agent.
-        Returns messages in the proper format for type="messages" chatbot.
+        Handles user messages and sends them to the agent with streaming.
+        Yields updates to the history for a real-time chat experience.
         """
+        from smolagents.models import ChatMessageStreamDelta
+        from smolagents.agents import FinalAnswerStep
+
+        history.append({"role": "user", "content": user_msg})
+        history.append({"role": "assistant", "content": ""})
+
         try:
-            response = self.agent.run(user_msg)
-
-            # Add user message
-            history.append({
-                "role": "user", 
-                "content": user_msg
-            })
-
-            # Add assistant response
-            history.append({
-                "role": "assistant", 
-                "content": str(response)
-            })
-
-            return history, ""  # Clear input box after submission
+            # Enable streaming by setting stream=True
+            response_generator = self.agent.run(user_msg, stream=True)
+            
+            # The content of the last message will be updated with the streamed response
+            for step in response_generator:
+                if isinstance(step, ChatMessageStreamDelta) and step.content:
+                    history[-1]["content"] += step.content
+                    yield history, "" # Yield the updated history to the UI
+                elif isinstance(step, FinalAnswerStep):
+                    # When the final answer is ready, we replace the streamed content with it
+                    history[-1]["content"] = str(step.output)
+                    yield history, ""
 
         except Exception as e:
-            # Add user message
-            history.append({
-                "role": "user", 
-                "content": user_msg
-            })
-
-            # Add error message as assistant response
-            history.append({
-                "role": "assistant", 
-                "content": f"⚠️ Agent error: {str(e)}"
-            })
-
-            return history, ""
+            history[-1]["content"] = f"⚠️ Agent error: {str(e)}"
+            yield history, ""
 
     
     def clear_memory(self):
@@ -62,6 +57,45 @@ class GradioUI:
         """
         self.agent.memory.steps = []
         return [], ""  # Clear chat history and input box
+
+    def upload_file(self, file):
+        """
+        Handles file uploads and runs the ingestion pipeline.
+        """
+        if file is None:
+            return "No file uploaded."
+
+        file_path = Path(file.name)
+        
+        try:
+            # Run the pipeline script as a subprocess
+            # Using sys.executable ensures that we use the same python environment
+            process = subprocess.run(
+                [sys.executable, "run_pipeline.py", str(file_path)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8", 
+                errors="replace",
+                check=True
+            )
+            
+            # If the script runs successfully, we'll get a success message.
+            # You can customize this message as needed.
+            output = f" **File '{file_path.name}' processed successfully!**\n\n"
+            output += "You can now ask questions about its content.\n\n"
+            output += "--- **Processing Details** ---\n"
+            output += f"```\n{process.stdout}\n```"
+
+        except subprocess.CalledProcessError as e:
+            # If there's an error, we'll show the error message.
+            output = f" **Error processing file '{file_path.name}'.**\n\n"
+            output += "--- **Error Details** ---\n"
+            output += f"```\n{e.stderr}\n```"
+        
+        except Exception as e:
+            output = f"An unexpected error occurred: {str(e)}"
+
+        return output
     
     def build_interface(self):
         """
@@ -77,34 +111,33 @@ class GradioUI:
             gr.Markdown("## 🔬 Spectroscopy RAG Chatbot")
             gr.Markdown("Ask questions about your spectroscopy documents. The agent will retrieve relevant information and provide answers.")
             
-            # Main chat interface
-            chatbot = gr.Chatbot(
-                type="messages",
-                height=500,
-                label="Conversation",
-                avatar_images=(None, None),  # No avatars
-                bubble_full_width=False
-            )
-            
-            # Input controls
             with gr.Row():
-                msg_input = gr.Textbox(
-                    placeholder="Type your question and press Enter...",
-                    container=False,
-                    scale=4
-                )
-                clear_btn = gr.Button("🔄 Clear Memory", scale=1)
-            
-            # Example questions
-            gr.Examples(
-                examples=[
-                    "What is Raman spectroscopy?",
-                    "Explain the principles of fluorescence lifetime imaging.",
-                    "How does Fourier-transform infrared spectroscopy work?",
-                    "What are the applications of mass spectrometry?"
-                ],
-                inputs=msg_input
-            )
+                with gr.Column(scale=2):
+                    # Main chat interface
+                    chatbot = gr.Chatbot(
+                        type="messages",
+                        height=500,
+                        label="Conversation",
+                        avatar_images=(None, None),  # No avatars
+                        bubble_full_width=False
+                    )
+                    
+                    # Input controls
+                    with gr.Row():
+                        msg_input = gr.Textbox(
+                            placeholder="Type your question and press Enter...",
+                            container=False,
+                            scale=4
+                        )
+                        clear_btn = gr.Button("🔄 Clear Memory", scale=1)
+
+                    #gr.Markdown("**Note:** Add `--deep` to your query to broaden the search range.")
+
+                    
+                    gr.Markdown("###  File Upload")
+                    upload_button = gr.UploadButton("Click to Upload a PDF", file_types=[".pdf"])
+                    upload_status = gr.Markdown(value="Upload a PDF to add it to the knowledge base.")
+
             
             # Event handlers
             msg_input.submit(
@@ -116,6 +149,12 @@ class GradioUI:
             clear_btn.click(
                 fn=self.clear_memory,
                 outputs=[chatbot, msg_input]
+            )
+
+            upload_button.upload(
+                fn=self.upload_file,
+                inputs=[upload_button],
+                outputs=[upload_status]
             )
             
         return interface
