@@ -14,6 +14,22 @@ The Spectroscopy Agent is a research assistant that uses a Retrieval-Augmented G
 - **User Interfaces:** Provides both a command-line interface (CLI) and a web-based interface (Gradio) for interacting with the agent.
 - **State Management:** Keeps track of the processing state of each document using a schema file.
 
+
+## Agentic RAG
+
+This project implements an **Agentic RAG** pipeline. This means that instead of a simple "retrieve-then-generate" workflow, the system uses a `CodeAgent` from the `smolagents` library to reason, plan, and execute a series of steps to answer a user's query.
+
+The agent has access to a set of tools that allow it to interact with the knowledge base and formulate a comprehensive answer. This allows for a more dynamic and intelligent response process. The agent can:
+- Decide which collection of documents to search in.
+- Retrieve relevant chunks of text.
+- Analyze the retrieved information.
+- Synthesize the information and provide a final answer.
+
+The core of the agentic system is the `CodeAgent` which is initialized in `app.py`. This agent is provided with a set of tools that it can use to perform its tasks. The available tools are:
+-   `retrieve_chunks`: This tool is used to retrieve relevant text chunks from the ChromaDB vector database.
+-   `get_schema_info`: This tool can be used to get information about the available data collections and their schemas.
+-   `final_answer`: This tool is used to provide the final answer to the user.
+
 ## How it Works
 
 The Spectroscopy Agent is built around a RAG pipeline that consists of two main stages: data ingestion and retrieval/generation.
@@ -23,13 +39,13 @@ The Spectroscopy Agent is built around a RAG pipeline that consists of two main 
 The data ingestion pipeline is orchestrated by the `run_pipeline.py` script. It takes PDF files as input and performs the following steps:
 
 1.  **Copying:** The PDF files are copied to the `docs_pdfs/published` directory.
-2.  **Parsing and Chunking (`PDFParsing.py`):
+2.  **Parsing and Chunking (`PDFParsing.py`):**
     -   The script reads PDFs from the `docs_pdfs/thesis` and `docs_pdfs/published` directories.
     -   It extracts metadata (title, author, year) from the PDFs using `PyMuPDF` and `pikepdf`.
     -   It renames the PDFs based on the extracted metadata and copies them to the `docs_pdfs/papers` directory.
     -   The text of the PDFs is then split into smaller chunks, which are saved as Parquet files in the `pdf_chunks_parquet` directory.
     -   The status of each processed file is tracked in the `info_schema.json` file.
-3.  **Embedding (`Embedding.py`):
+3.  **Embedding (`Embedding.py`):**
     -   This script reads the chunked Parquet files.
     -   It generates vector embeddings for the text chunks using the `BAAI/bge-small-en-v1.5` sentence transformer model.
     -   The embeddings are stored in a ChromaDB vector database located in the `.spectroscopy_chromadb` directory.
@@ -40,12 +56,12 @@ The data ingestion pipeline is orchestrated by the `run_pipeline.py` script. It 
 The retrieval and generation stage is handled by the main application (`app.py`), which can be run as a CLI or a Gradio web app.
 
 1.  **User Query:** The user enters a query through the CLI or the web interface.
-2.  **Retrieval (`Retrieval.py`):
+2.  **Retrieval (`Retrieval.py`):**
     -   The `retrieve_from_collection` function is called with the user's query.
     -   The query is embedded using the same model that was used for the documents.
     -   The embedded query is used to search the ChromaDB database for the most relevant text chunks.
     -   (Optional) The retrieved chunks are re-ranked using the `cross-encoder/ms-marco-MiniLM-L-6-v2` model to improve relevance.
-3.  **Generation (`app.py`):
+3.  **Generation (`app.py`):**
     -   The retrieved chunks and the user's query are passed to a Large Language Model (LLM).
     -   The LLM generates a comprehensive answer based on the provided information.
     -   The answer is then streamed back to the user in the web interface or printed in the CLI.
