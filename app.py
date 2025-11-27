@@ -7,7 +7,7 @@ import sys
 from UI_Gradio import GradioUI as create_ui  # Import the Gradio UI class
 from toolbox.final_answer import FinalAnswerTool
 from toolbox.retrieve_chunks import retrieve_chunks
-#from toolbox.create_metadata_filter import create_metadata_filter
+
 #from toolbox.list_collections import list_collections
 from toolbox.get_schema_info import get_schema_info
 

@@ -6,7 +6,7 @@ def safe_text(s: str) -> str:
     return s.replace('"', "'").replace("\n", " ")
 
 @tool
-def retrieve_chunks(query: str, collection_name: str, n_results: int = 5, metadata_filter: dict = None, use_reranker: bool = False) -> str:
+def retrieve_chunks(query: str, collection_name: str, n_results: int = 7, use_reranker: bool = False) -> str:
     """
     Retrieve the most relevant chunks from a specified collection.
 
@@ -14,8 +14,6 @@ def retrieve_chunks(query: str, collection_name: str, n_results: int = 5, metada
         query (str): The user's question to search for relevant chunks.
         collection_name (str): The name of the collection to search in.
         n_results (int): The number of top relevant chunks to return.
-        metadata_filter (dict): Optional: A dictionary for metadata filtering. 
-                               Example: {"author": "John Doe", "year": "2023"}
         use_reranker (bool): Optional: If True, uses a CrossEncoder model to re-rank
                                the results for improved relevance. Defaults to False.
 
@@ -23,13 +21,10 @@ def retrieve_chunks(query: str, collection_name: str, n_results: int = 5, metada
         A JSON string representing a list of chunk objects, each with text and citation metadata.
     """
     
-    # The metadata_filter is now passed directly as a dictionary.
-
     results = retrieve_from_collection(
         query_text=query, 
         collection_name=collection_name, 
         n_results=n_results,
-        metadata_filter=metadata_filter, # Pass the dictionary directly
         use_reranker=use_reranker
     )
 

@@ -13,7 +13,7 @@ EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 RERANKER_MODEL = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
 
-def retrieve_from_collection(query_text: str, collection_name: str, n_results: int = 5, metadata_filter: dict = None, use_reranker: bool = False):
+def retrieve_from_collection(query_text: str, collection_name: str, n_results: int = 5, use_reranker: bool = False):
     """
     Queries a SPECIFIC ChromaDB collection to find the most relevant chunks.
 
@@ -21,8 +21,6 @@ def retrieve_from_collection(query_text: str, collection_name: str, n_results: i
         query_text (str): The user's question or search term.
         collection_name (str): The name of the collection to query.
         n_results (int): The number of relevant chunks to retrieve.
-        metadata_filter (dict, optional): A dictionary for metadata filtering. 
-                                          Example: {"author": "John Doe", "year": "2023"}
         use_reranker (bool, optional): If True, uses a CrossEncoder model to re-rank
                                        the results for improved relevance. Defaults to False.
 
@@ -53,7 +51,6 @@ def retrieve_from_collection(query_text: str, collection_name: str, n_results: i
     results = collection.query(
         query_texts=[query_with_instruction],
         n_results=num_candidates,
-        where=metadata_filter,
         include=["documents", "metadatas", "distances"]
     )
 

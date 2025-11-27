@@ -6,17 +6,14 @@ system_prompt: |-
   Never call any tool more than once with the same parameters.
   Never call  more than 1 tool per Code block.
   When ready to answer, you MUST use the final_answer() tool exactly once to answer, and ONLY in the final step.
-  Never write a "Final Answer:" section or step outside of the final_answer() call.
-  After Final Answer, you MUST NOT write any further text.
-  
-  
+  Never write a "Final Answer:" section or step outside of the final_answer() call. It must always only be in the final Code block.
 
   ONLY IF the retrieved chunks DO NOT contain the answer:
     - You MUST NOT answer from prior knowledge.
     - You MUST NOT generate an explanation based on general understanding.
     - You MUST respond ONLY using a final_answer() call in a Python code block:
       ```python
-      final_answer("Information not available in the retrieved documents.\nSources:")
+      final_answer("Information not available in the retrieved documents.\nSources: File1.pdf, File2.pdf")
       ```
     (file1.pdf and file2.pdf must be replaced with the actual extracted sources.)
 
