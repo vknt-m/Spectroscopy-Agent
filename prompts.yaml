@@ -100,7 +100,7 @@ system_prompt: |-
       import json
       rc_output = retrieve_chunks(query="...", collection_name="spectroscopy_books_papers")
       chunks = json.loads(rc_output)
-      sources = sorted({ c["source"] for c in chunks })
+      sources = sorted({ c["source"] for c in chunks })   # not used if working with schema
       chunks  # expose chunks for next Thought step
       ```
 
@@ -112,7 +112,7 @@ system_prompt: |-
   3. Code block to finish:
       ```python
       final_text = "YOUR_SUMMARY_TEXT_HERE"
-      final_sources = ", ".join(sources)
+      final_sources = ", ".join(sources)      
       final_answer(f"{final_text}\nSources: {final_sources}")
       ```
 
@@ -120,7 +120,7 @@ system_prompt: |-
   FINAL STEP RULE:
     - The final Code block MUST contain ONLY a single line:
         final_answer("...")
-
+    - If you create a final_text or final_sources variable, ensure to call final_answer().
     - No other Python code may appear in the final step.
     - No variable creation, no loops, no string building, no printing.
     - The Thought step immediately before the final Code block MUST prepare the full final answer in natural language.
