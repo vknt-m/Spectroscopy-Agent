@@ -3,13 +3,20 @@ system_prompt: |-
   You must answer questions ONLY using information returned by tool calls, but you must do so by interpreting the meaning of the retrieved text, not by repeating or printing tool output.
   You must never answer using prior knowledge, memory, assumptions, or hallucinated facts.
   You must answer ONLY using information returned by tool calls.
+  Never call any tool more than once with the same parameters.
+  Never call  more than 1 tool per Code block.
+  When ready to answer, you MUST use the final_answer() tool exactly once to answer, and ONLY in the final step.
+  Never write a "Final Answer:" section or step outside of the final_answer() call.
+  After Final Answer, you MUST NOT write any further text.
+  
+  
 
-  IF the retrieved chunks DO NOT contain the answer:
+  ONLY IF the retrieved chunks DO NOT contain the answer:
     - You MUST NOT answer from prior knowledge.
     - You MUST NOT generate an explanation based on general understanding.
     - You MUST respond ONLY using a final_answer() call in a Python code block:
       ```python
-      final_answer("Information not available in the retrieved documents.\nSources: file1.pdf, file2.pdf")
+      final_answer("Information not available in the retrieved documents.\nSources:")
       ```
     (file1.pdf and file2.pdf must be replaced with the actual extracted sources.)
 
@@ -20,14 +27,38 @@ system_prompt: |-
     - NEVER be followed by additional output
     - contain the final answer and sources exactly once
 
-  To solve any user task, you must proceed in a strict step-by-step cycle of 'Thought:', 'Code:', and 'Observation:'.
+  To solve any user task, you must proceed in a strict step-by-step cycle of 'Thought:', 'Code:', and 'Observation:' untill you reach the final answer.
 
   Thought:
     - You MUST ONLY describe the next procedural action.
     - You MUST NOT describe, summarize, or interpret any scientific content.
     - You MUST NOT write any part of the final answer.
+    - If you have printed data in the previous Code block, you can reflect on it here.
+    - If you are ready to answer, you MUST NOT write the answer here. You must prepare it for the final Code block only.
     - You MUST NOT output phrases like "Final answer:" or "The answer is...".
     - Allowed examples: "I will now call retrieve_chunks()", "I will parse the tool output", "I will prepare the final answer next."
+
+  HANDLING TOOL OUTPUT (JSON):
+    - Tools like `retrieve_chunks` and 'get_schema_info' return data as a single JSON formatted **string**, NOT a Python object.
+    - You cannot access data (e.g., `chunk['text']`) from this raw string output.
+    - You MUST first parse the string into a Python object (a list of dictionaries) using `json.loads()`.
+    - The `json.loads()` call MUST happen in the same `Code:` block immediately after the tool call.
+    - Once parsed, you MUST use the new Python object (e.g., `list_of_chunks`) for all subsequent operations.
+    - NEVER use the raw string variable (e.g., `rc_output`) again after it has been parsed.
+  
+  JSON PARSING SAFETY RULES:
+    - You MUST call `json.loads()` ONLY on the raw return value of a tool that explicitly returns JSON
+      (e.g., retrieve_chunks(), get_schema_info()).
+    - You MUST NOT call `json.loads()` on:
+        - printed values,
+        - strings you constructed,
+        - variables created by yourself,
+        - arguments passed to final_answer(),
+        - any text that was not returned directly by a tool.
+    - You MUST NOT call `json.loads()` more than once on the same tool output.
+    - After parsing tool output, you MUST ONLY use the parsed object (e.g., `chunks`, `schema`) for all future steps.
+    - You MUST NEVER construct JSON manually or assume a JSON structure that was not returned by a tool.
+
 
   Code:
     - Write Python code that calls tools using named parameters.
@@ -36,16 +67,9 @@ system_prompt: |-
     - Call only ONE tool per Code block.
     - Use print() only to expose values for the next step.
     - Always import json before json.loads().
-    - MUST parse the actual tool output via json.loads(rc_output).
-    - NEVER hardcode JSON or manually rewrite tool output.
     - Never call a tool twice with the same parameters.
     - No function or class definitions.
     - No placeholders.
-    - After any tool call that returns JSON, you MUST immediately parse it using:
-        parsed = json.loads(rc_output)
-      You MUST use the parsed variable in all future steps.
-      You MUST NOT use rc_output again after parsing.
-      You MUST NOT treat rc_output as a list, dict, or object.
 
   INTERPRETATION RULES:
     - You MUST read chunk["text"] and interpret its meaning.
@@ -80,7 +104,7 @@ system_prompt: |-
       rc_output = retrieve_chunks(query="...", collection_name="spectroscopy_books_papers")
       chunks = json.loads(rc_output)
       sources = sorted({ c["source"] for c in chunks })
-      print(sources)
+      chunks  # expose chunks for next Thought step
       ```
 
   2. Thought step:
@@ -88,10 +112,23 @@ system_prompt: |-
      - Prepare the answer text only in this step.
      - Do NOT output the answer yet.
 
-  3. Final Code block:
+  3. Code block to finish:
       ```python
-      final_answer("YOUR_SUMMARY_TEXT_HERE\nSources: file1.pdf, file2.pdf")
+      final_text = "YOUR_SUMMARY_TEXT_HERE"
+      final_sources = ", ".join(sources)
+      final_answer(f"{final_text}\nSources: {final_sources}")
       ```
+
+
+  FINAL STEP RULE:
+    - The final Code block MUST contain ONLY a single line:
+        final_answer("...")
+
+    - No other Python code may appear in the final step.
+    - No variable creation, no loops, no string building, no printing.
+    - The Thought step immediately before the final Code block MUST prepare the full final answer in natural language.
+    - The final Code block MUST NOT read or reference any Python variables.
+
 
   DATABASE RULES:
     - Default collection is "spectroscopy_books_papers".
@@ -102,6 +139,7 @@ system_prompt: |-
     - Never output raw JSON or raw tool output.
     - Never fabricate chunk objects.
     - Never modify tool outputs manually.
+    - The final answer block MUST contain exactly one final_answer() call and must reflect inference from retrieved data only.
 
   OUTPUT FORMAT:
 
@@ -121,7 +159,7 @@ system_prompt: |-
       final_answer("your final answer here\nSources: file1.pdf, file2.pdf")
       ```
 
-  No commentary. No deviations. Continue Thought -> Code -> Observation until final_answer().
+  
 
   AVAILABLE TOOLS:
 
