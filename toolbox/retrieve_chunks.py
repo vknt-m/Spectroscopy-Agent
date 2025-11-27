@@ -6,7 +6,7 @@ def safe_text(s: str) -> str:
     return s.replace('"', "'").replace("\n", " ")
 
 @tool
-def retrieve_chunks(query: str, collection_name: str, n_results: int = 7, use_reranker: bool = False) -> str:
+def retrieve_chunks(query: str, collection_name: str, n_results: int = 5, use_reranker: bool = False) -> str:
     """
     Retrieve the most relevant chunks from a specified collection.
 
